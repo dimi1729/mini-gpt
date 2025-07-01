@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import warnings
 
 from config import Config
 from primitives import SelfAttention, MLP
-from tokenizer import tokenize
+from tokenizer import tokenize, decode
 
 class Block(nn.Module):
     def __init__(self, config):
@@ -28,7 +29,7 @@ class MiniGPT(nn.Module):
         self.transformer = nn.ModuleDict(
             dict(
                 wte = nn.Embedding(config.vocab_size, config.n_embed),
-                wve = nn.Embedding(config.block_size, config.n_embed),
+                wpe = nn.Embedding(config.block_size, config.n_embed),
                 h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 ln_f = nn.LayerNorm(config.n_embed)
             )
@@ -55,20 +56,29 @@ class MiniGPT(nn.Module):
 
 
 if __name__ == '__main__':
+
+    device = 'cpu'
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else:
+        warnings.warn("CUDA is not available, using CPU")
+        # Only here to allow local testing, is practically very difficult to use cpu
+
+
     config = Config()
     model = MiniGPT(config)
     model.eval()
     model.to('cuda')
 
     tokens = tokenize("Hello my name is") # (L)
-    tokens.unsqueeze(0) # (1, L) where 1 serves as batch
+    tokens = tokens.unsqueeze(0) # (1, L) where 1 serves as batch
 
     x = tokens.to('cuda')
 
     torch.manual_seed(1729)
     torch.cuda.manual_seed(1729)
 
-    max_token_length = 20
+    max_token_length = 30
     while x.size(1) < max_token_length:
         with torch.no_grad():
             logits = model(x) # (B, L, vocab_size)
@@ -84,3 +94,4 @@ if __name__ == '__main__':
 
             # Append to the sequence to regenerate next token
             x = torch.cat((x, xcol), dim=1)
+            print(decode(x[0]))
