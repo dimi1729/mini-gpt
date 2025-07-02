@@ -6,6 +6,7 @@ import warnings
 from config import Config
 from primitives import SelfAttention, MLP
 from tokenizer import tokenize, decode
+from dataloader import create_training_batches
 
 class Block(nn.Module):
     def __init__(self, config):
@@ -37,7 +38,7 @@ class MiniGPT(nn.Module):
 
         self.lm_head = nn.Linear(config.n_embed, config.vocab_size, bias=False)
 
-    def forward(self, idx):
+    def forward(self, idx, targets):
         B, L = idx.size()
         assert L <= self.config.block_size, f"Sequence length {L} must be less than block size {self.config.block_size}"
 
@@ -51,8 +52,13 @@ class MiniGPT(nn.Module):
             x = block(x)
 
         x = self.transformer.ln_f(x)
-        logits = self.lm_head(x)
-        return logits
+        logits = self.lm_head(x) # (B, T, vocab_size)
+
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+        return logits, loss
 
 
 if __name__ == '__main__':
@@ -64,34 +70,17 @@ if __name__ == '__main__':
         warnings.warn("CUDA is not available, using CPU")
         # Only here to allow local testing, is practically very difficult to use cpu
 
+    x, y = create_training_batches(device=device)
 
-    config = Config()
-    model = MiniGPT(config)
-    model.eval()
-    model.to('cuda')
+    model = MiniGPT(Config())
+    model.to(device)
+    # logits, loss = model(x, y)
+    # print(loss)
 
-    tokens = tokenize("Hello my name is") # (L)
-    tokens = tokens.unsqueeze(0) # (1, L) where 1 serves as batch
-
-    x = tokens.to('cuda')
-
-    torch.manual_seed(1729)
-    torch.cuda.manual_seed(1729)
-
-    max_token_length = 30
-    while x.size(1) < max_token_length:
-        with torch.no_grad():
-            logits = model(x) # (B, L, vocab_size)
-            logits = logits[:, -1, :] # Get 'newest' logit, (B, vocab_size)
-            probs = F.softmax(logits, dim=-1) # convert to probs
-
-            # Do topk sampling to ignore unlikely vals
-            topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
-
-            # Pick random token from topk
-            ix = torch.multinomial(topk_probs, 1) # (B, 1)
-            xcol = torch.gather(topk_indices, -1, ix) # (B, 1)
-
-            # Append to the sequence to regenerate next token
-            x = torch.cat((x, xcol), dim=1)
-            print(decode(x[0]))
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    for i in range(50):
+        optimizer.zero_grad()
+        logits, loss = model(x, y)
+        loss.backward()
+        optimizer.step()
+        print(f"Epoch {i+1}: Loss = {loss.item()}")
