@@ -2,45 +2,33 @@ import torch
 
 from typing import Tuple
 
-from tokenizer import decode, tokenize
+from tokenizer import tokenize
 
 TRAINING_DATA_PATH = "data/tiny_shakespeare.txt"
-NUM_BATCHES = 2
-NUM_TOKENS = 5
 
-def create_training_batches(training_data_path: str = TRAINING_DATA_PATH,
-                            B: int = NUM_BATCHES,
-                            T: int = NUM_TOKENS,
-                            device = "cuda"
-                            ) -> Tuple[torch.Tensor, torch.Tensor]:
-    with open(training_data_path, "r") as f:
-        text = f.read()
-    data = text
+class DataLoader:
+    def __init__(self, B, T, device="cuda"):
+        self.B = B
+        self.T = T
+        self.device = device
 
-    tokens = tokenize(data)
+        self.current_position = 0
 
-    if B > 1:
-        tokens = tokens[:-(len(tokens) % B)]
-    assert len(tokens) >= (T + 1) * B, f"Expected {(T + 1) * B} tokens, got {len(tokens)}"
+        with open(TRAINING_DATA_PATH, "r") as f:
+            text = f.read()
+        data = text
+        self.tokens: torch.Tensor = tokenize(data)
+        print(f"1 epoch = {len(self.tokens) // self.B // self.T} tokens")
 
-    buf = torch.tensor(tokens[:B * T + 1])
-    x = buf[:-1].view(B, T).to(device)
-    y = buf[1:].view(B, T).to(device)
+    def next_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        B = self.B
+        T = self.T
+        buf = self.tokens[self.current_position:self.current_position + B * T + 1]
+        x = buf[:-1].view(B, T).to(self.device)
+        y = buf[1:].view(B, T).to(self.device)
 
-    return x, y
+        self.current_position += B*T
+        if self.current_position >= len(self.tokens):
+            self.current_position = 0
 
-
-if __name__ == '__main__':
-    with open(TRAINING_DATA_PATH, "r") as f:
-        text = f.read()
-    data = text
-
-    tokens = tokenize(data)
-
-    if NUM_BATCHES > 1:
-        tokens = tokens[:-(len(tokens) % NUM_BATCHES)]
-    assert len(tokens) >= (NUM_TOKENS + 1) * NUM_BATCHES, f"Expected {(NUM_TOKENS + 1) * NUM_BATCHES} tokens, got {len(tokens)}"
-
-    buf = torch.tensor(tokens[:NUM_BATCHES * NUM_TOKENS + 1])
-    x = buf[:-1].view(NUM_BATCHES, NUM_TOKENS)
-    y = buf[1:].view(NUM_BATCHES, NUM_TOKENS)
+        return x, y

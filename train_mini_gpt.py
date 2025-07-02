@@ -5,8 +5,7 @@ import warnings
 
 from config import Config
 from primitives import SelfAttention, MLP
-from tokenizer import tokenize, decode
-from dataloader import create_training_batches
+from dataloader import DataLoader
 
 class Block(nn.Module):
     def __init__(self, config):
@@ -70,7 +69,7 @@ if __name__ == '__main__':
         warnings.warn("CUDA is not available, using CPU")
         # Only here to allow local testing, is practically very difficult to use cpu
 
-    x, y = create_training_batches(device=device)
+    dataloader = DataLoader(10, 50, device=device)
 
     model = MiniGPT(Config())
     model.to(device)
@@ -79,6 +78,7 @@ if __name__ == '__main__':
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     for i in range(50):
+        x, y = dataloader.next_batch()
         optimizer.zero_grad()
         logits, loss = model(x, y)
         loss.backward()
