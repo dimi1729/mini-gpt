@@ -37,6 +37,29 @@ class MiniGPT(nn.Module):
 
         self.lm_head = nn.Linear(config.n_embed, config.vocab_size, bias=False)
 
+        # Add weight sharing
+        # gpt2 paper describes weight sharing between the input embedding and the output embedding
+        # since the same weights should be used to translate to the embedding space
+        self.transformer.wte.weight = self.lm_head.weight
+
+        self._manual_init_weights()
+
+    def _manual_init_weights(self):
+        for module in self.modules():
+            self._init_weights(module)
+
+    def _init_weights(self, module) -> None:
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, "mini_gpt_scale"):
+                std *= (2 * self.config.n_layer) ** -0.5
+            nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        # Leave LayerNorm init alone
+
     def forward(self, idx, targets):
         B, L = idx.size()
         assert L <= self.config.block_size, f"Sequence length {L} must be less than block size {self.config.block_size}"
@@ -69,9 +92,13 @@ if __name__ == '__main__':
         warnings.warn("CUDA is not available, using CPU")
         # Only here to allow local testing, is practically very difficult to use cpu
 
+    torch.manual_seed(1729)
+    torch.cuda.manual_seed(1729)
+
     dataloader = DataLoader(10, 50, device=device)
 
-    model = MiniGPT(Config())
+    config = Config()
+    model = MiniGPT(config)
     model.to(device)
     # logits, loss = model(x, y)
     # print(loss)

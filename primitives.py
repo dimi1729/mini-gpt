@@ -12,6 +12,7 @@ class SelfAttention(nn.Module):
         self.qkv_attn = nn.Linear(config.n_embed, config.n_embed * 3)
         # for output
         self.c_proj = nn.Linear(config.n_embed, config.n_embed)
+        self.c_proj.mini_gpt_scale = 1  # Scale std by sqrt n as according to gpt2 paper
 
         self.n_head = config.n_head
         self.n_embed = config.n_embed
@@ -46,6 +47,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embed, config.n_embed * 4)
         self.gelu = nn.GELU()
         self.c_proj = nn.Linear(config.n_embed * 4, config.n_embed)
+        self.c_proj.mini_gpt_scale = 1  # Scale std by sqrt n as according to gpt2 paper
 
     def forward(self, x):
         x = self.c_fc(x)
