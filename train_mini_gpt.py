@@ -7,6 +7,7 @@ import time
 from config import Config
 from primitives import SelfAttention, MLP
 from dataloader import DataLoader
+from learning_rate_scheduler import LearningRateScheduler
 
 class Block(nn.Module):
     def __init__(self, config):
@@ -107,17 +108,22 @@ if __name__ == '__main__':
     # logits, loss = model(x, y)
     # print(loss)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    initial_optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+    lr_scheduler = LearningRateScheduler(initial_optimizer)
     for i in range(50):
         t0 = time.time()
         x, y = dataloader.next_batch()
-        optimizer.zero_grad()
+        lr_scheduler.optimizer.zero_grad()
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             logits, loss = model(x, y)
         loss.backward()
-        optimizer.step()
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+        lr_scheduler.set_lr(i)
+        lr_scheduler.optimizer.step()
+
         torch.cuda.synchronize()
         t1 = time.time()
         dt = t1 - t0
         tokens_per_s = (dataloader.B * dataloader.T) / dt
-        print(f"Epoch {i+1}: Loss = {loss.item()}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}")
+        print(f"Epoch {i+1}: Loss = {loss.item()}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
