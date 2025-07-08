@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import warnings
+import time
 
 from config import Config
 from primitives import SelfAttention, MLP
@@ -95,19 +96,28 @@ if __name__ == '__main__':
     torch.manual_seed(1729)
     torch.cuda.manual_seed(1729)
 
-    dataloader = DataLoader(10, 50, device=device)
+    dataloader = DataLoader(B=4, T=1024, device=device)
 
-    config = Config()
+    torch.set_float32_matmul_precision('high') # TF32 precision
+
+    config = Config(vocab_size=50304) # 50304 is div by 128 so it is a "nicer number" than 50257
     model = MiniGPT(config)
     model.to(device)
+    model = torch.compile(model)
     # logits, loss = model(x, y)
     # print(loss)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     for i in range(50):
+        t0 = time.time()
         x, y = dataloader.next_batch()
         optimizer.zero_grad()
-        logits, loss = model(x, y)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x, y)
         loss.backward()
         optimizer.step()
-        print(f"Epoch {i+1}: Loss = {loss.item()}")
+        torch.cuda.synchronize()
+        t1 = time.time()
+        dt = t1 - t0
+        tokens_per_s = (dataloader.B * dataloader.T) / dt
+        print(f"Epoch {i+1}: Loss = {loss.item()}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}")

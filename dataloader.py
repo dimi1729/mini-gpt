@@ -18,7 +18,6 @@ class DataLoader:
             text = f.read()
         data = text
         self.tokens: torch.Tensor = tokenize(data)
-        print(f"1 epoch = {len(self.tokens) // self.B // self.T} tokens")
 
     def next_batch(self) -> Tuple[torch.Tensor, torch.Tensor]:
         B = self.B

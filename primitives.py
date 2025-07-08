@@ -30,11 +30,12 @@ class SelfAttention(nn.Module):
         k = k.view(B, L, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, L, hs)
         v = v.view(B, L, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, L, hs)
 
-        attn = (q @ k.transpose(-2, -1)) * (1.0/np.sqrt(k.size(-1)))
-        attn = attn.masked_fill(self.mask[:,:,:L,:L] == 0, float('-inf'))
-        attn = F.softmax(attn, dim=2)
+        # attn = (q @ k.transpose(-2, -1)) * (1.0/np.sqrt(k.size(-1)))
+        # attn = attn.masked_fill(self.mask[:,:,:L,:L] == 0, float('-inf'))
+        # attn = F.softmax(attn, dim=2)
+        # y = attn @ v # (B, nh, L, L) x (B, nh, L, hs) = (B, nh, L, hs)
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # Uses flash attention calculation
 
-        y = attn @ v # (B, nh, L, L) x (B, nh, L, hs) = (B, nh, L, hs)
         y = y.transpose(1, 2).contiguous().view(B, L, C)
 
         out = self.c_proj(y)
