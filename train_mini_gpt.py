@@ -1,13 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import warnings
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 import time
 
 from config import Config
 from primitives import SelfAttention, MLP
 from dataloader import DataLoader
 from learning_rate_scheduler import LearningRateScheduler
+from distributed_data_processing import DataDDP
 
 class Block(nn.Module):
     def __init__(self, config):
@@ -87,31 +89,30 @@ class MiniGPT(nn.Module):
 
 if __name__ == '__main__':
 
-    device = 'cpu'
-    if torch.cuda.is_available():
-        device = 'cuda'
-    else:
-        warnings.warn("CUDA is not available, using CPU")
-        # Only here to allow local testing, is practically very difficult to use cpu
-
-    torch.manual_seed(1729)
-    torch.cuda.manual_seed(1729)
+    ddp = DataDDP()
+    use_ddp = ddp.init_ddp()
 
     # Use gpt3 ~0.5M batch size with grad accumulation
-    total_batch_size = 524288  # 2**19
+    debug = True
+    if debug:
+        total_batch_size = 65536  # 2**16
+    else:
+        total_batch_size = 524288  # 2**19
     B = 4
     T = 1024
     assert total_batch_size % (B * T) == 0, "Batch size must be divisible by B"
     grad_accum_steps = total_batch_size // (B * T)
 
-    dataloader = DataLoader(B=B, T=T, device=device)
+    dataloader = DataLoader(B=B, T=T, process_rank=ddp.ddp_local_rank, num_processes=ddp.ddp_world_size, device=ddp.device)
 
     torch.set_float32_matmul_precision('high') # TF32 precision
 
     config = Config(vocab_size=50304) # 50304 is div by 128 so it is a "nicer number" than 50257
     model = MiniGPT(config)
-    model.to(device)
+    model.to(ddp.device)
     model = torch.compile(model)
+    if use_ddp:
+        model = DDP(model, device_ids=[ddp.ddp_local_rank], output_device=ddp.device)
     # logits, loss = model(x, y)
     # print(loss)
 
@@ -124,11 +125,16 @@ if __name__ == '__main__':
         total_loss = 0.0
         for sub_step in range(grad_accum_steps):
             x, y = dataloader.next_batch()
-            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            with torch.autocast(device_type=ddp.device, dtype=torch.bfloat16):
                 logits, loss = model(x, y)
             loss = loss / grad_accum_steps
             total_loss += loss.detach()
+            if use_ddp:
+                model.require_backward_grad_sync = (sub_step == grad_accum_steps - 1)
             loss.backward()
+        if use_ddp:
+            dist.all_reduce(total_loss, op=dist.ReduceOp.AVG)
+
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
         lr_scheduler.set_lr(i)
@@ -137,5 +143,9 @@ if __name__ == '__main__':
         torch.cuda.synchronize()
         t1 = time.time()
         dt = t1 - t0
-        tokens_per_s = (dataloader.B * dataloader.T) / dt
-        print(f"Epoch {i+1}: Loss = {total_loss}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
+        tokens_per_s = (dataloader.B * dataloader.T) * ddp.ddp_world_size / dt
+        if ddp.master_process:
+            print(f"Epoch {i+1}: Loss = {total_loss}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
+
+    if use_ddp:
+        dist.destroy_process_group()

@@ -7,12 +7,14 @@ from tokenizer import tokenize
 TRAINING_DATA_PATH = "data/tiny_shakespeare.txt"
 
 class DataLoader:
-    def __init__(self, B, T, device="cuda"):
+    def __init__(self, B, T, process_rank, num_processes, device="cuda"):
         self.B = B
         self.T = T
+        self.process_rank = process_rank
+        self.num_processes = num_processes
         self.device = device
 
-        self.current_position = 0
+        self.current_position = B * T * process_rank
 
         with open(TRAINING_DATA_PATH, "r") as f:
             text = f.read()
@@ -30,8 +32,8 @@ class DataLoader:
         x = buf[:-1].view(B, T).to(self.device)
         y = buf[1:].view(B, T).to(self.device)
 
-        self.current_position += B*T
+        self.current_position += B * T * self.num_processes
         if self.current_position >= len(self.tokens):
-            self.current_position = 0
+            self.current_position = B * T * self.process_rank
 
         return x, y
