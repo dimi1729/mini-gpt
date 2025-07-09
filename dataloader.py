@@ -23,6 +23,10 @@ class DataLoader:
         B = self.B
         T = self.T
         buf = self.tokens[self.current_position:self.current_position + B * T + 1]
+        if len(buf) < B * T + 1:
+            self.current_position = 0
+            buf = self.tokens[self.current_position:self.current_position + B * T + 1]
+
         x = buf[:-1].view(B, T).to(self.device)
         y = buf[1:].view(B, T).to(self.device)
 

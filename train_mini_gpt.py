@@ -97,7 +97,14 @@ if __name__ == '__main__':
     torch.manual_seed(1729)
     torch.cuda.manual_seed(1729)
 
-    dataloader = DataLoader(B=4, T=1024, device=device)
+    # Use gpt3 ~0.5M batch size with grad accumulation
+    total_batch_size = 524288  # 2**19
+    B = 4
+    T = 1024
+    assert total_batch_size % (B * T) == 0, "Batch size must be divisible by B"
+    grad_accum_steps = total_batch_size // (B * T)
+
+    dataloader = DataLoader(B=B, T=T, device=device)
 
     torch.set_float32_matmul_precision('high') # TF32 precision
 
@@ -108,15 +115,20 @@ if __name__ == '__main__':
     # logits, loss = model(x, y)
     # print(loss)
 
-    initial_optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+    initial_optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8, fused=True)
     lr_scheduler = LearningRateScheduler(initial_optimizer)
     for i in range(50):
         t0 = time.time()
-        x, y = dataloader.next_batch()
         lr_scheduler.optimizer.zero_grad()
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
-            logits, loss = model(x, y)
-        loss.backward()
+
+        total_loss = 0.0
+        for sub_step in range(grad_accum_steps):
+            x, y = dataloader.next_batch()
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                logits, loss = model(x, y)
+            loss = loss / grad_accum_steps
+            total_loss += loss.detach()
+            loss.backward()
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
 
         lr_scheduler.set_lr(i)
@@ -126,4 +138,4 @@ if __name__ == '__main__':
         t1 = time.time()
         dt = t1 - t0
         tokens_per_s = (dataloader.B * dataloader.T) / dt
-        print(f"Epoch {i+1}: Loss = {loss.item()}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
+        print(f"Epoch {i+1}: Loss = {total_loss}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
