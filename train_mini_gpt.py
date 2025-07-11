@@ -67,7 +67,12 @@ if __name__ == '__main__':
         dt = t1 - t0
         tokens_per_s = (dataloader.B * dataloader.T) * ddp.ddp_world_size / dt
         if ddp.master_process:
-            print(f"Epoch {i+1}: Loss = {total_loss}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
+            print(f"Step {i+1}: Loss = {total_loss}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
+
+            if i > 0 and i % 10 == 0:
+                checkpoint_path = f"checkpoints/checkpoint_{i}.pt"
+                torch.save(model.state_dict(), checkpoint_path)
+                print(f"Saved checkpoint to {checkpoint_path}")
 
     if use_ddp:
         dist.destroy_process_group()

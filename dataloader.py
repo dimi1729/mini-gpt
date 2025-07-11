@@ -4,7 +4,7 @@ from typing import Tuple
 
 from tokenizer import tokenize
 
-TRAINING_DATA_PATH = "data/tiny_shakespeare.txt"
+TRAINING_DATA_PATH = "data/tiny_shakespeare.txt"  # 338025 total tokens
 
 class DataLoader:
     def __init__(self, B, T, process_rank, num_processes, device="cuda"):
@@ -37,3 +37,8 @@ class DataLoader:
             self.current_position = B * T * self.process_rank
 
         return x, y
+
+if __name__ == "__main__":
+    # Quick way to see num tokens in dataset
+    dataloader = DataLoader(4, 8, 0, 1, "cuda")
+    print(dataloader.tokens.shape)
