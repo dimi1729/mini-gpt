@@ -76,10 +76,15 @@ if __name__ == '__main__':
 
 
     # Load model from checkpoint
-    checkpoint_path = "checkpoints/checkpoint_10.pt"
+    checkpoint_path = "checkpoints/checkpoint_3000.pt"
     model = load_model_from_checkpoint(checkpoint_path, device)
 
-    tokens = tokenize("Hello my name is") # (L)
+    tokens = tokenize(
+        """RODERIGO:
+Thou toldst me thou didst hold him in thy hate.
+
+IAGO:
+        """) # (L)
     tokens = tokens.unsqueeze(0) # (1, L) where 1 serves as batch
 
     x = tokens.to(device)
@@ -87,7 +92,7 @@ if __name__ == '__main__':
     torch.manual_seed(1729)
     torch.cuda.manual_seed(1729)
 
-    max_token_length = 30
+    max_token_length = 200
     while x.size(1) < max_token_length:
         with torch.no_grad():
             logits, _ = model(x, None) # (B, L, vocab_size)
@@ -103,4 +108,5 @@ if __name__ == '__main__':
 
             # Append to the sequence to regenerate next token
             x = torch.cat((x, xcol), dim=1)
-            print(decode(x[0]))
+
+    print(decode(x[0]))

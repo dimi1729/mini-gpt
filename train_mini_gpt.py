@@ -1,6 +1,7 @@
 import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+import wandb
 import time
 
 from config import Config
@@ -14,14 +15,23 @@ if __name__ == '__main__':
     ddp = DataDDP()
     use_ddp = ddp.init_ddp()
 
+    if ddp.master_process:
+        wandb.init(
+            project="mini-gpt",
+            name="mini-shakespeare",
+            config={
+                "batch_size": 32768
+            }
+        )
+
     # Use gpt3 ~0.5M batch size with grad accumulation
     debug = True
     if debug:
-        total_batch_size = 65536  # 2**16
+        total_batch_size = 32768  # 2**16
     else:
         total_batch_size = 524288  # 2**19
     B = 4
-    T = 1024
+    T = 512
     assert total_batch_size % (B * T) == 0, "Batch size must be divisible by B"
     grad_accum_steps = total_batch_size // (B * T)
 
@@ -39,8 +49,12 @@ if __name__ == '__main__':
     # print(loss)
 
     initial_optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8, fused=True)
-    lr_scheduler = LearningRateScheduler(initial_optimizer)
-    for i in range(50):
+    lr_scheduler = LearningRateScheduler(initial_optimizer, warmup_steps=100, max_steps=10000)
+
+    if ddp.master_process:
+        wandb.watch(model, log="all", log_freq=10)
+
+    for i in range(10000):
         t0 = time.time()
         lr_scheduler.optimizer.zero_grad()
 
@@ -68,8 +82,14 @@ if __name__ == '__main__':
         tokens_per_s = (dataloader.B * dataloader.T) * ddp.ddp_world_size / dt
         if ddp.master_process:
             print(f"Step {i+1}: Loss = {total_loss}, time = {dt*1000:.2f} ms, tok/s = {tokens_per_s:.2f}, norm = {norm:.3f}, lr = {lr_scheduler.get_lr(i):.5f}")
+            wandb.log({
+                "train/loss": total_loss,
+                "train/tokens_per_second": tokens_per_s,
+                "train/norm": norm,
+                "train/lr": lr_scheduler.get_lr(i)
+            }, step=i+1)
 
-            if i > 0 and i % 10 == 0:
+            if i > 0 and i % 1000 == 0:
                 checkpoint_path = f"checkpoints/checkpoint_{i}.pt"
                 torch.save(model.state_dict(), checkpoint_path)
                 print(f"Saved checkpoint to {checkpoint_path}")
